@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import { User, Sparkles, ArrowRight, Gamepad2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from './../ui/toaster';
 
 const GuestLogin: React.FC = () => {
   const { signInAsGuest, loading } = useAuth();
@@ -14,18 +15,22 @@ const GuestLogin: React.FC = () => {
     
     try {
       await signInAsGuest(displayName || undefined);
+      toast.success('Welcome! Enjoy the games! 🎮');
       navigate('/select-standard');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Guest login error:', error);
+      toast.error('Failed to start as guest. Please try again.');
     }
   };
 
   const handleQuickStart = async () => {
     try {
       await signInAsGuest();
+      toast.success('Welcome! Enjoy the games! 🎮');
       navigate('/select-standard');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Quick start error:', error);
+      toast.error('Failed to start as guest. Please try again.');
     }
   };
 

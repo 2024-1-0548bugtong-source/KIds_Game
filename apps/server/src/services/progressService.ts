@@ -133,36 +133,49 @@ export async function getUserProgress(userId: string): Promise<UserProgress | nu
 /**
  * Get top users by XP for leaderboard
  * @param limit Number of top users to retrieve (default: 10)
+ * @param grade Optional grade filter for grade-scoped leaderboard
  * @returns Promise with array of leaderboard entries
  */
-export async function getTopUsers(limit: number = 10): Promise<LeaderboardEntry[]> {
+export async function getTopUsers(limit: number = 10, grade?: number): Promise<LeaderboardEntry[]> {
   try {
-    // Query userProgress collection, order by XP descending, limit to specified number
+    const fetchSize = grade ? Math.max(limit * 5, 50) : limit;
+
     const snapshot = await db.collection('userProgress')
       .orderBy('xp', 'desc')
-      .limit(limit)
+      .limit(fetchSize)
       .get();
-    
+
     if (snapshot.empty) {
       logger.info('No users found for leaderboard');
       return [];
     }
-    
-    // Map documents to leaderboard entries
-    const leaderboard: LeaderboardEntry[] = snapshot.docs.map(doc => {
+
+    const entries = await Promise.all(snapshot.docs.map(async (doc) => {
       const data = doc.data() as UserProgress;
+
+      if (typeof grade === 'number') {
+        const userDoc = await db.collection('users').doc(doc.id).get();
+        const userGrade = userDoc.exists ? (userDoc.data() as any)?.standard : undefined;
+        if (userGrade !== grade) {
+          return null;
+        }
+      }
+
       return {
         userId: doc.id,
         xp: data.xp,
         level: data.level,
         avatar: data.avatar
-      };
-    });
-    
-    logger.info(`Retrieved ${leaderboard.length} users for leaderboard`);
+      } as LeaderboardEntry;
+    }));
+
+    const leaderboard = entries.filter((entry): entry is LeaderboardEntry => entry !== null).slice(0, limit);
+
+    logger.info(`Retrieved ${leaderboard.length} users for leaderboard${typeof grade === 'number' ? ` (grade ${grade})` : ''}`);
     return leaderboard;
   } catch (error) {
     logger.error('Error getting top users for leaderboard:', error);
-    throw error;
+    // Allow the app to keep working in local/dev environments where Firestore is unavailable.
+    return [];
   }
 }
