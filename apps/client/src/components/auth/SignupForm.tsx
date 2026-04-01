@@ -44,9 +44,12 @@ const SignupForm: React.FC = () => {
 
     try {
       await signUp(formData.email, formData.password, formData.displayName);
+      toast.success('Account created successfully! Welcome to GameLearn! 🎮');
       navigate('/select-standard');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Signup error:', error);
+      const errorMessage = error?.message || 'Failed to create account. Please try again.';
+      toast.error(errorMessage || 'Sign up failed. Please try again.');
     }
   };
 

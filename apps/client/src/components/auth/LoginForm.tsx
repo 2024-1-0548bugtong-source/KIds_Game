@@ -32,9 +32,12 @@ const LoginForm: React.FC = () => {
 
     try {
       await signIn(formData.email, formData.password);
+      toast.success('Welcome back! 🎉');
       navigate('/select-standard');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
+      const errorMessage = error?.message || 'Failed to sign in. Please try again.';
+      toast.error(errorMessage || 'Login failed. Please check your credentials.');
     }
   };
 
