@@ -1,7 +1,7 @@
 # 🎮 GameLearn - AI-Powered Game-Based Learning Platform
 
 A modern, gamified educational platform designed for students in grades 5-10, featuring AI-powered adaptive learning, interactive games, and a beautiful user interface.
-
+updated
 ## ✨ Features
 
 ### 🎯 Core Features
