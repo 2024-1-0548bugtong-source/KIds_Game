@@ -490,6 +490,31 @@ const LanguageDetective: React.FC<LanguageDetectiveProps> = ({ grade }) => {
   const { currentUser } = useAuth();
   const { recordActivity } = useProgress();
 
+  const startNewRound = () => {
+    // Get challenges appropriate for this grade level
+    const gradeChallenges = getChallengesForGrade(grade);
+
+    // Select a random challenge that hasn't been used yet
+    const availableChallenges = gradeChallenges.filter(challenge =>
+      !gameState.identifiedIssues.includes(challenge.id)
+    );
+
+    const randomChallenge = availableChallenges.length > 0
+      ? availableChallenges[Math.floor(Math.random() * availableChallenges.length)]
+      : gradeChallenges[Math.floor(Math.random() * gradeChallenges.length)];
+
+    setGameState(prev => ({
+      ...prev,
+      currentChallenge: randomChallenge,
+      selectedText: null,
+      showFeedback: false,
+      timeRemaining: getTimePerRound(grade),
+      showHint: false,
+      hintPenalty: 0,
+      showExplanation: false
+    }));
+  };
+
   // Initialize game
   useEffect(() => {
     startNewRound();
@@ -520,31 +545,6 @@ const LanguageDetective: React.FC<LanguageDetectiveProps> = ({ grade }) => {
 
     return () => clearInterval(timer);
   }, [gameState.gameCompleted, gameState.showFeedback]);
-
-  const startNewRound = () => {
-    // Get challenges appropriate for this grade level
-    const gradeChallenges = getChallengesForGrade(grade);
-
-    // Select a random challenge that hasn't been used yet
-    const availableChallenges = gradeChallenges.filter(challenge =>
-      !gameState.identifiedIssues.includes(challenge.id)
-    );
-
-    const randomChallenge = availableChallenges.length > 0
-      ? availableChallenges[Math.floor(Math.random() * availableChallenges.length)]
-      : gradeChallenges[Math.floor(Math.random() * gradeChallenges.length)];
-
-    setGameState(prev => ({
-      ...prev,
-      currentChallenge: randomChallenge,
-      selectedText: null,
-      showFeedback: false,
-      timeRemaining: getTimePerRound(grade),
-      showHint: false,
-      hintPenalty: 0,
-      showExplanation: false
-    }));
-  };
 
   const handleTextSelection = () => {
     if (gameState.showFeedback) return;
