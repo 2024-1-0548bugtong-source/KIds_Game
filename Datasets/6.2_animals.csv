@@ -1,0 +1,11 @@
+Name,Has_Fur,Can_Fly,Legs
+Dog,Yes,No,4
+Cat,Yes,No,4
+Bat,Yes,Yes,2
+Eagle,No,Yes,2
+Shark,No,No,0
+Elephant,Yes,No,4
+Frog,No,No,4
+Parrot,No,Yes,2
+Bear,Yes,No,4
+Ostrich,No,No,2

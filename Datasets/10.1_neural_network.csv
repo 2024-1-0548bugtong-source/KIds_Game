@@ -1,0 +1,9 @@
+Layer,Node,Connected_To
+Input,X1,"H1, H2"
+Input,X2,"H1, H3"
+Input,X3,"H2, H3"
+Hidden,H1,O1
+Hidden,H2,O1
+Hidden,H3,O2
+Output,O1,Y
+Output,O2,Z
