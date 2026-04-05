@@ -7,9 +7,20 @@ import {
   User as FirebaseUser,
   updateProfile
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { joinUserRoom } from '../services/socketService';
+
+// Helper function to remove undefined properties from an object
+const removeUndefinedProps = (obj: any) => {
+  const newObj: any = {};
+  Object.keys(obj).forEach(key => {
+    if (obj[key] !== undefined) {
+      newObj[key] = obj[key];
+    }
+  });
+  return newObj;
+};
 
 // User types
 export interface UserProfile {
@@ -145,68 +156,87 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Sign up with Firebase
   const signUp = async (email: string, password: string, displayName?: string) => {
     try {
-      setLoading(true);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Update display name in Firebase Auth
-      if (displayName && userCredential.user) {
-        await updateProfile(userCredential.user, { displayName });
+      const user = userCredential.user;
+
+      if (displayName) {
+        await updateProfile(user, { displayName });
       }
-      
-      // Convert to UserProfile and save to Firestore
-      const userProfile = await convertFirebaseUser(userCredential.user);
-      setCurrentUser(userProfile);
-      
-      // Join user's socket room for real-time updates
-      joinUserRoom(userProfile.uid);
-      
-      console.log('Account created successfully! Welcome to GameLearn! 🎮');
-    } catch (error: any) {
-      console.error('Sign up error:', error);
-      let errorMessage = 'Failed to create account. Please try again.';
-      
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'An account with this email already exists.';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password should be at least 6 characters.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Please enter a valid email address.';
+
+      const userProfile: UserProfile = {
+        uid: user.uid,
+        email: user.email,
+        role: 'student',
+        displayName: displayName || user.displayName || 'New User',
+        avatar: '👤',
+        xp: 0,
+        level: 1,
+        badges: ['newbie'],
+        createdAt: new Date(),
+        lastLoginAt: new Date(),
+      };
+
+      try {
+        // Ensure we don't write undefined fields
+        await setDoc(doc(db, 'users', user.uid), removeUndefinedProps(userProfile));
+      } catch (firestoreError) {
+        console.error("Error creating user document in Firestore:", firestoreError);
+        // Optionally, you might want to delete the created user if Firestore fails
+        // await user.delete();
+        throw new Error("Failed to create user profile in the database.");
       }
-      
-      console.log(errorMessage);
-      throw error;
-    } finally {
-      setLoading(false);
+
+    } catch (authError: any) {
+      console.error("Detailed signup error:", authError);
+      if (authError.code === 'auth/email-already-in-use') {
+        throw new Error('This email is already registered.');
+      }
+      throw new Error(authError.message || 'An unknown error occurred during sign up.');
     }
   };
 
   // Sign in with Firebase
   const signIn = async (email: string, password: string) => {
     try {
-      setLoading(true);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userProfile = await convertFirebaseUser(userCredential.user);
-      setCurrentUser(userProfile);
+      const user = userCredential.user;
       
-      console.log('Welcome back! 🎉');
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (!userDoc.exists()) {
+        // If the document doesn't exist, create it. This can happen if a user
+        // was created in Auth but the Firestore doc creation failed.
+        console.warn(`No Firestore document found for user ${user.uid}. Creating one now.`);
+        const newUserProfile: UserProfile = {
+          uid: user.uid,
+          email: user.email,
+          role: 'student', // Default role
+          displayName: user.displayName || 'New User',
+          avatar: '👤',
+          xp: 0,
+          level: 1,
+          badges: ['newbie'],
+          createdAt: new Date(),
+          lastLoginAt: new Date(),
+        };
+        await setDoc(userDocRef, removeUndefinedProps(newUserProfile));
+        setCurrentUser(newUserProfile);
+        joinUserRoom(user.uid);
+      } else {
+        // If it exists, just update the last login time.
+        await updateDoc(userDocRef, {
+          lastLoginAt: serverTimestamp()
+        });
+      }
+
     } catch (error: any) {
       console.error('Sign in error:', error);
-      let errorMessage = 'Invalid email or password';
-      
-      if (error.code === 'auth/user-not-found') {
-        errorMessage = 'No account found with this email.';
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = 'Incorrect password.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Please enter a valid email address.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many failed attempts. Please try again later.';
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        throw new Error('Invalid email or password');
       }
-      
-      console.log(errorMessage);
+      // Re-throw other errors to be caught by the form handler
       throw error;
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -252,106 +282,78 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Update user profile
   const updateUserProfile = async (updates: Partial<UserProfile>) => {
     if (!currentUser) return;
-    
+
+    const userDocRef = doc(db, 'users', currentUser.uid);
     try {
-      const updatedUser = { ...currentUser, ...updates };
-      setCurrentUser(updatedUser);
-      
-      if (currentUser.role === 'guest') {
-        // Guest user - update local storage
-        storeGuestUser(updatedUser);
-      } else {
-        // Firebase user - update Firestore
-        await setDoc(doc(db, 'users', currentUser.uid), {
-          ...updatedUser,
-          lastLoginAt: new Date()
-        }, { merge: true });
-      }
-      
-      console.log('Profile updated successfully! ✨');
+      // Ensure we don't write undefined fields
+      await updateDoc(userDocRef, removeUndefinedProps(updates));
+      setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
     } catch (error) {
-      console.error('Update profile error:', error);
-      console.log('Failed to update profile. Please try again.');
+      console.error('Error updating user profile:', error);
+      throw new Error('Failed to update profile.');
     }
   };
 
   // Listen for Firebase auth state changes
   useEffect(() => {
-    // Set a timeout to prevent infinite loading
-    const loadingTimeout = setTimeout(() => {
-      if (loading) {
-        console.log('Loading timeout reached, checking for guest user');
-        const guestUser = getGuestUser();
-        if (guestUser) {
-          setCurrentUser(guestUser);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (user) {
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as UserProfile;
+            setCurrentUser({
+              ...userData,
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName || userData.displayName,
+            });
+            
+            // Update last login time without saving undefined fields
+            await updateDoc(userDocRef, {
+              lastLoginAt: serverTimestamp()
+            });
+
+            joinUserRoom(user.uid);
+          } else {
+            // If the document doesn't exist, create it. This can happen if a user
+            // was created in Auth but the Firestore doc creation failed.
+            console.warn(`No Firestore document found for user ${user.uid}. Creating one now.`);
+            const newUserProfile: UserProfile = {
+              uid: user.uid,
+              email: user.email,
+              role: 'student', // Default role
+              displayName: user.displayName || 'New User',
+              avatar: '👤',
+              xp: 0,
+              level: 1,
+              badges: ['newbie'],
+              createdAt: new Date(),
+              lastLoginAt: new Date(),
+            };
+            await setDoc(userDocRef, removeUndefinedProps(newUserProfile));
+            setCurrentUser(newUserProfile);
+            joinUserRoom(user.uid);
+          }
+        } else {
+          // User is signed out
+          const guest = getGuestUser();
+          setCurrentUser(guest);
         }
+      } catch (error) {
+        console.error('Error in auth state change:', error);
+      } finally {
         setLoading(false);
       }
-    }, 5000); // 5 second timeout
+    });
 
-    try {
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-        try {
-          clearTimeout(loadingTimeout); // Clear timeout if Firebase responds
-          
-          if (firebaseUser) {
-            // Firebase user signed in
-            const userProfile = await convertFirebaseUser(firebaseUser);
-            setCurrentUser(userProfile);
-            
-            // Join user's socket room for real-time updates
-            joinUserRoom(userProfile.uid);
-          } else {
-            // Check for guest user in localStorage
-            const guestUser = getGuestUser();
-            if (guestUser) {
-              setCurrentUser(guestUser);
-            } else {
-              setCurrentUser(null);
-            }
-          }
-        } catch (error) {
-          console.error('Error in auth state change:', error);
-          // Fallback to guest user if Firebase fails
-          const guestUser = getGuestUser();
-          if (guestUser) {
-            setCurrentUser(guestUser);
-          } else {
-            setCurrentUser(null);
-          }
-        } finally {
-          setLoading(false);
-        }
-      });
-
-      return () => {
-        clearTimeout(loadingTimeout);
-        unsubscribe();
-      };
-    } catch (error) {
-      console.error('Error setting up Firebase auth listener:', error);
-      clearTimeout(loadingTimeout);
-      // If Firebase fails completely, check for guest user
-      const guestUser = getGuestUser();
-      if (guestUser) {
-        setCurrentUser(guestUser);
-      }
-      setLoading(false);
-    }
-  }, [loading]);
-
-  const value: AuthContextType = {
-    currentUser,
-    loading,
-    signUp,
-    signIn,
-    signInAsGuest,
-    signOut,
-    updateUserProfile
-  };
+    return () => unsubscribe();
+  }, []);
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ currentUser, loading, signUp, signIn, signInAsGuest, signOut, updateUserProfile }}>
       {children}
     </AuthContext.Provider>
   );

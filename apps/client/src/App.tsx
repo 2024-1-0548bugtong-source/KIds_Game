@@ -11,17 +11,31 @@ import ChatbotProvider from './components/chatbot/ChatbotProvider';
 import { initializeSocket, disconnectSocket } from './services/socketService';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
-  const { currentUser } = useAuth();
+  const { currentUser, loading } = useAuth();
+  if (loading) return null;
   return currentUser ? children : <Navigate to="/" />;
 }
 
 function PublicRoute({ children }: { children: React.ReactElement }) {
-  const { currentUser } = useAuth();
-  return !currentUser ? children : <Navigate to="/main" />;
+  const { currentUser, loading } = useAuth();
+  if (loading) return null;
+  // Keep login page accessible for guest mode users restored from local storage.
+  if (currentUser?.role === 'guest') {
+    return children;
+  }
+  if (currentUser) {
+    // If user is logged in but hasn't selected a standard, redirect them
+    if (!currentUser.standard) {
+      return <Navigate to="/select-standard" />;
+    }
+    return <Navigate to="/main" />;
+  }
+  return children;
 }
 
 function RequireStandard({ children }: { children: React.ReactElement }) {
-  const { currentUser } = useAuth();
+  const { currentUser, loading } = useAuth();
+  if (loading) return null;
   if (!currentUser) return <Navigate to="/" />;
   if (!('standard' in currentUser) || !currentUser.standard) {
     return <Navigate to="/select-standard" />;

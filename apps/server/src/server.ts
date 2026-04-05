@@ -61,6 +61,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: (message: string) => logger.info(message.trim()) } }));
 app.use(limiter);
 
+// Import and use API routes
+import apiRoutes from './routes';
+app.use('/api', apiRoutes);
+
+
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({ 
@@ -110,183 +115,22 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   });
 });
 
-// Import Firebase and services
-import './config/firebase';
-import { updateUserProgress, getUserProgress, getTopUsers } from './services/progressService';
-import { processQuestion, validateQuestion } from './services/chatbotService';
+// Socket.io connection handling
+import { handleSocketConnection } from './services/socketService';
+handleSocketConnection(io);
 
 
-// Progress update endpoint (called on real activity)
-app.post('/api/progress/update', async (req: Request, res: Response) => {
-  try {
-    const { userId, xpEarned, gameResult } = req.body;
-    if (!userId || typeof xpEarned !== 'number') {
-      return res.status(400).json({ success: false, error: 'Missing userId or xpEarned' });
-    }
-
-    // Update progress in Firestore
-    const progress = await updateUserProgress({
-      userId,
-      xpEarned,
-      gameResult
-    });
-
-    return res.json({
-      success: true,
-      progress: {
-        xp: progress.xp,
-        level: progress.level,
-        gamesPlayed: progress.gamesPlayed,
-        dayStreak: progress.dayStreak,
-        levelProgress: progress.levelProgress,
-        week: progress.week
-      }
-    });
-  } catch (error) {
-    logger.error('Error in progress update endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to update progress'
-    });
-  }
+// 404 Handler
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.status(404).json({ success: false, error: 'Route not found' });
 });
 
-// Get user progress endpoint
-app.get('/api/progress/:userId', async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.params;
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing userId' });
-    }
-
-    // Get progress from Firestore
-    const progress = await getUserProgress(userId);
-    
-    if (!progress) {
-      return res.status(404).json({
-        success: false,
-        error: 'No progress found for this user'
-      });
-    }
-
-    return res.json({
-      success: true,
-      progress
-    });
-  } catch (error) {
-    logger.error('Error in get progress endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to get progress'
-    });
-  }
-});
-
-// Get top users for leaderboard
-app.get('/api/leaderboard/top', async (req: Request, res: Response) => {
-  try {
-    // Get limit from query parameter or use default (10)
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
-    
-    // Validate limit
-    if (isNaN(limit) || limit < 1 || limit > 100) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid limit. Must be a number between 1 and 100.' 
-      });
-    }
-    
-    // Get top users from Firestore
-    const leaderboard = await getTopUsers(limit);
-    
-    return res.json({
-      success: true,
-      leaderboard
-    });
-  } catch (error) {
-    logger.error('Error in leaderboard endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve leaderboard'
-    });
-  }
-});
-
-// Chatbot endpoint
-app.post('/api/chatbot/ask', async (req: Request, res: Response) => {
-  try {
-    const { question } = req.body;
-    
-    // Validate input
-    if (!question) {
-      return res.status(400).json({
-        success: false,
-        error: 'Question is required'
-      });
-    }
-    
-    // Sanitize and validate question
-    const sanitizedQuestion = validateQuestion(question);
-    if (!sanitizedQuestion) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid question format or length'
-      });
-    }
-    
-    // Process question with Groq API
-    const result = await processQuestion(sanitizedQuestion);
-    
-    return res.json(result);
-  } catch (error) {
-    logger.error('Error in chatbot endpoint:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to process question'
-    });
-  }
-});
-
-// Socket.IO connection handling
-io.on('connection', (socket: Socket) => {
-  logger.info(`User connected: ${socket.id}`);
-
-  // Join user to their personal room
-  socket.on('join-user-room', (userId: string) => {
-    socket.join(`user-${userId}`);
-    logger.info(`User ${userId} joined their room`);
-  });
-
-  // Handle game progress updates
-  socket.on('game-progress', (data: any) => {
-    // Broadcast to all connected clients
-    io.emit('game-progress-update', data);
-  });
-
-  // Handle leaderboard updates
-  socket.on('leaderboard-update', (data: any) => {
-    io.emit('leaderboard-refresh', data);
-  });
-
-  socket.on('disconnect', () => {
-    logger.info(`User disconnected: ${socket.id}`);
-  });
-});
-
-// Error handling middleware
+// Global error handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   logger.error(err.stack);
   res.status(500).json({
     success: false,
     error: 'Something went wrong!'
-  });
-});
-
-// 404 handler
-app.use('*', (req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
   });
 });
 
